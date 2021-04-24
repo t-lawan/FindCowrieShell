@@ -2,17 +2,24 @@
 
 //--------------------------------------------------------------
 void ofApp::setup(){
-    
+    ofSetFrameRate(2);
     bLearnBackground = false;
+    hasLearntBackground = false;
+    
     vidGrabber.setVerbose(true);
     vidGrabber.listDevices();
     vidGrabber.setDeviceID(0);
     vidGrabber.initGrabber(width, height);
+    
     numOfCowrieShell = 8;
     rTarget = 203;
     gTarget = 242;
     bTarget = 250;
-    threshold = 20;
+    
+    cowrieDetectorThreshold = 23;
+    motionDetectorThreshold = 0.2;
+    colourThreshold = 20;
+    isChanging = false;
 
     colorImg.allocate(width, height);
     grayImage.allocate(width, height);
@@ -26,41 +33,54 @@ void ofApp::update(){
     vidGrabber.update();
     //do we have a new frame?
     if (vidGrabber.isFrameNew()){
-        colorImg.setFromPixels(vidGrabber.getPixels());
-        grayImage = colorImg; // convert our color image to a grayscale image
-        if (bLearnBackground == true) {
-            grayBg = grayImage; // update the background image
-            bLearnBackground = false;
-        }
-        grayDiff.absDiff(grayBg, grayImage);
-        float threshold = ofMap(ofGetMouseX(), 0, ofGetWidth(), 1, 100); //26
-        grayDiff.threshold(23);
-        contourFinder.findContours(grayDiff, 5, (width * height)/3, numOfCowrieShell, false, true);
-        
+        updateCowrieDetector();
+        updateMotionDetector();
+        updateGrid();
     }
-    updateMotionDetector();
-    updateGrid();
+    
+
 }
 
+void ofApp::updateCowrieDetector(){
+    colorImg.setFromPixels(vidGrabber.getPixels());
+    grayImage = colorImg; // convert our color image to a grayscale image
+    if (bLearnBackground == true) {
+        grayBg = grayImage; // update the background image
+        bLearnBackground = false;
+        hasLearntBackground = true;
+    }
+    grayDiff.absDiff(grayBg, grayImage);
+//    cowrieDetectorThreshold = ofMap(ofGetMouseX(), 0, ofGetWidth(), 1, 100); //26
+    grayDiff.threshold(cowrieDetectorThreshold);
+    contourFinder.findContours(grayDiff, 5, (width * height)/3, numOfCowrieShell, false, true);
+}
+
+
 void ofApp::updateMotionDetector(){
+    if(hasLearntBackground && !isChanging && areAllCowrieShellsPresent()){
+        if(grayImagePrev.bAllocated){
+            motionDetectorDiff.absDiff(grayImage, grayImagePrev);
+            ofPixels p = motionDetectorDiff.getPixels();
+            unsigned char* pixelData = p.getData();
+            float cValue = 0.0;
+            for(int i = 0; i < p.size(); i+=20){
+                cValue = cValue + pixelData[i];
+            }
+            cValue = cValue/ p.size();
+//            cout << cValue << endl;
+            if(cValue > motionDetectorThreshold){
+                cout << "CHANGED" << endl;
+                isChanging = true;
+                getDivination();
+                isChanging = false;
+            }
+        }
+    }
+
     if(grayImage.bAllocated) {
         grayImagePrev = grayImage;
     }
     
-    if(grayImagePrev.bAllocated){
-        motionDetectorDiff.absDiff(grayImage, grayImagePrev);
-        
-        diffFloat = motionDetectorDiff;
-        diffFloat *= 5.0;
-        
-        if(!bufferFloat.bAllocated){
-            bufferFloat = diffFloat;
-        } else {
-            bufferFloat *= 0.85;
-            bufferFloat += diffFloat;
-        }
-        
-    }
 }
 //--------------------------------------------------------------
 void ofApp::draw(){
@@ -68,7 +88,7 @@ void ofApp::draw(){
     ofSetHexColor(0xffffff);
     colorImg.draw(0, 0, width, height);
     ofColor  c = ofColor::red;
-    
+
     ofImage img;
     img.grabScreen(0, 0, width, height);
     ofColor co = img.getColor(ofGetMouseX(), ofGetMouseY());
@@ -80,33 +100,25 @@ void ofApp::draw(){
 //        ofSetColor(c);
 //        ofDrawEllipse(r.x, r.y, 20, 20);
 //    }
-//    drawGrid();
-    
-//    if(diffFloat.bAllocated){
-//        int w = grayImage.width;
-//        int h = grayImage.height;
-//        float *pixels = bufferFloat.getPixelsAsFloats();
-//        for (int y=0; y<h; y++) {
-//            for (int x=0; x<w; x++) {
-//                //Get the pixel value
-//                float value = pixels[ x + w * y ];
-//                //If value exceed threshold, then draw pixel
-//                // between 0.3 and 2.0
-//                if ( value >= 0.3 ) {
-//                    ofSetColor(ofColor::blue);
-//                    ofDrawRectangle( x, y, 1, 1 );
-//                    //Rectangle with size 1x1 means pixel
-//                    //Note, this is slow function,
-//                    //we use it here just for simplicity
-//                }
-//            }
-//        }
-//    }
 
 }
 
+void ofApp::setupClient(){
+    ofxTCPSettings settings("127.0.0.1", 11324);
+    client.setup(settings);
+}
 
+void ofApp::sendMessageToServer(){
+    setupClient();
+    if(client.isConnected()){
+        // we are connected - lets try to receive from the server
+        string str = client.receive();
+        client.send(json.dump());
 
+    }
+    
+    client.close();
+}
 
 void ofApp::createGrid(){
     for(int x = 0; x < gridSize; x++) {
@@ -126,36 +138,18 @@ void ofApp::updateGrid() {
         bool isOccupied = false;
         for(int i = 0; i < contourFinder.nBlobs; i++) {
             ofVec2f blobPos(contourFinder.blobs[i].centroid.x, contourFinder.blobs[i].centroid.y);
-            
-
             if(grid[x].isWithinBounds(blobPos)) {
                 isOccupied = true;
             }
         }
-//        ofVec2f pos(ofGetMouseX(), ofGetMouseY());
-//        isOccupied = grid[i].isWithinBounds(pos);
         grid[x].setIsOccupied(isOccupied);
     }
 }
 
-
-void ofApp::drawGrid(){
-    ofPushStyle();
-    ofNoFill();
-    ofColor c(0);
-    
-    for(auto cell: grid) {
-        if(cell.isOccupied) {
-            c = ofColor::red;
-        } else {
-            c = ofColor::blue;
-        }
-        
-        ofSetColor(c);
-        ofDrawRectangle(cell.x, cell.y, cell.width, cell.height);
-    }
-    
-    ofPopStyle();
+bool ofApp::areAllCowrieShellsPresent(){
+    bool r = contourFinder.nBlobs == numOfCowrieShell;
+    cout << r << endl;
+    return r;
 }
 
 void ofApp::getDivination(){
@@ -168,8 +162,6 @@ void ofApp::getDivination(){
     
     int numOfOnCowrieShell = 0;
     for(int i = 0; i < contourFinder.nBlobs; i++) {
-        
-        
         // Get Rect
         ofRectangle rect = contourFinder.blobs[i].boundingRect;
         bool hasGreenSpot = false;
@@ -177,7 +169,6 @@ void ofApp::getDivination(){
         // Get image of Blob
         ofImage img;
         img.grabScreen(rect.x, rect.y, rect.width, rect.height);
-        cout << "WIDTH: " << img.getWidth() << ", HEIGHT: " << img.getHeight() << endl;
         // Loop through image and find color
         for(float x = 0; x < img.getWidth();  x++) {
             for(float y = 0; y < img.getHeight();  y++ ) {
@@ -187,9 +178,7 @@ void ofApp::getDivination(){
                 float bAtXY = colorAtXY.b;
                 
                 float colorDistance = ofDist(rAtXY, gAtXY, bAtXY, rTarget, gTarget, bTarget);
-                cout << "COLOUR: " << colorDistance << endl;
-                if(colorDistance < threshold){
-                    
+                if(colorDistance < colourThreshold){
                     hasGreenSpot = true;
                 }
             }
@@ -200,8 +189,16 @@ void ofApp::getDivination(){
         }
     }
     
-    cout << "NUM OF CELLS OCCUPIED: " << numOfCellsOccupied << endl;
-    cout << "NUM OF ON COWRIE SHELL: " << numOfOnCowrieShell << endl;
+    state.numOfCellsOccupied = (float) numOfCellsOccupied/(gridSize* gridSize);
+    state.numOfOnCowrieShell = (float) numOfOnCowrieShell/numOfCowrieShell;
+    sendStateToSimulation();
+}
+
+void ofApp::sendStateToSimulation(){
+    json["cells_occupied"] = to_string(state.numOfCellsOccupied);
+    json["cowrie_shell"] = to_string(state.numOfOnCowrieShell);
+    sendMessageToServer();
+    cout << json.dump() << endl;
 }
 
 //--------------------------------------------------------------
@@ -209,50 +206,12 @@ void ofApp::keyPressed(int key){
     bLearnBackground = true;
 }
 
-//--------------------------------------------------------------
-void ofApp::keyReleased(int key){
-
-}
-
-//--------------------------------------------------------------
-void ofApp::mouseMoved(int x, int y ){
-
-}
-
-//--------------------------------------------------------------
-void ofApp::mouseDragged(int x, int y, int button){
-
-}
 
 //--------------------------------------------------------------
 void ofApp::mousePressed(int x, int y, int button){
-//    cout << "X : " << x << ", Y: " << y << endl;
     getDivination();
-//    ofImage img;
-//    img.grabScreen(0, 0, width, height);
-//    ofColor co = img.getColor(x, y);
-//    cout << "R : " << co.r << ", G: " << co.g << ", B: " << co.b << endl;
 }
 
-//--------------------------------------------------------------
-void ofApp::mouseReleased(int x, int y, int button){
-
-}
-
-//--------------------------------------------------------------
-void ofApp::mouseEntered(int x, int y){
-
-}
-
-//--------------------------------------------------------------
-void ofApp::mouseExited(int x, int y){
-
-}
-
-//--------------------------------------------------------------
-void ofApp::windowResized(int w, int h){
-
-}
 
 //--------------------------------------------------------------
 void ofApp::gotMessage(ofMessage msg){

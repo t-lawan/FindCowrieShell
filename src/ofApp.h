@@ -2,13 +2,21 @@
 
 #include "ofMain.h"
 #include "ofxOpenCv.h"
+#include "ofxNetwork.h"
 #include "Cell.h"
 #include "Vec2Key.h"
+class State {
+    public:
+        float numOfCellsOccupied = 0.0;
+        float numOfOnCowrieShell = 0.0;
+};
 
 class ofApp : public ofBaseApp{
 
 	public:
-        bool hasChanged;
+        State state;
+        bool isChanging;
+        bool hasLearntBackground;
         bool bLearnBackground;
         ofVideoGrabber vidGrabber;
         ofxCvColorImage colorImg;
@@ -27,40 +35,42 @@ class ofApp : public ofBaseApp{
         float rTarget;
         float gTarget;
         float bTarget;
-        float threshold;
-    
+        float colourThreshold;
+        float cowrieDetectorThreshold;
+        float motionDetectorThreshold;
         ofMesh mesh;
         ofEasyCam easyCam;
         vector<ofVec3f> offsets;
-
-        // These variables will let us store the polar coordinates of each vertex
-        vector<float> distances;
-        vector<float> angles;
-        ofVec3f meshCentroid;
+        ofJson json;
+        
+    
     
 		void setup();
 		void update();
 		void draw();
     
         void updateMotionDetector();
+        void updateCowrieDetector();
+        bool areAllCowrieShellsPresent();
         
         vector<Cell> grid;
         void createGrid();
         void updateGrid();
         void drawGrid();
-        
+    
+        ofxTCPClient client;
+        void setupClient();
+        void sendMessageToServer();
+        int connectTime;
+        int deltaTime;
     
         void getDivination();
     
+        void sendStateToSimulation();
+    
 		void keyPressed(int key);
-		void keyReleased(int key);
-		void mouseMoved(int x, int y );
-		void mouseDragged(int x, int y, int button);
 		void mousePressed(int x, int y, int button);
-		void mouseReleased(int x, int y, int button);
-		void mouseEntered(int x, int y);
-		void mouseExited(int x, int y);
-		void windowResized(int w, int h);
+
 		void dragEvent(ofDragInfo dragInfo);
 		void gotMessage(ofMessage msg);
 		
